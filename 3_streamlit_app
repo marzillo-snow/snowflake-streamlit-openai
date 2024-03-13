@@ -1,0 +1,62 @@
+# Import python packages
+import streamlit as st
+import pandas as pd
+from snowflake.snowpark.context import get_active_session
+from snowflake.snowpark.functions import array_agg
+
+# Get the current credentials
+session = get_active_session()
+
+# access underlying snowflake tables
+# let participants define this?-----------
+purchases_df = session.table("customer_purchases")
+products_df = session.table("products")
+categories_df = session.table("product_category")
+
+# join all tables together
+# let participants define this?-----------
+purchases_products_categories_df = purchases_df.join(products_df,purchases_df["product_id"] == products_df["product_id"]).join(categories_df, purchases_df["product_id"] == categories_df["product_id"])
+
+# aggregate products by customer
+# let participants define this?-----------
+purchases_products_df = purchases_products_categories_df.select("CUSTOMER_ID","PRODUCT_NAME").group_by("CUSTOMER_ID").agg(array_agg("PRODUCT_NAME").alias("product_array")).to_pandas()
+
+# aggregate product categories by customer
+# let participants define this?-----------
+purchases_categories_df = purchases_products_categories_df.select("CUSTOMER_ID","PRODUCT_CATEGORY").drop_duplicates().group_by("CUSTOMER_ID").agg(array_agg("PRODUCT_CATEGORY").alias("category_array")).to_pandas()
+
+# Add some cosmetic headers
+st.title("OpenAI Shopper")
+st.caption("a slightly less quick example")
+
+default_prompt = 'Review the customers most frequent retail purchases from last year. Write a personalized email explaining their shopper profile based on these habits. Add a tailored message suggesting products and brands for them to consider, from their purchase history.'
+
+with st.expander("Adjust system prompt"):
+    system = st.text_area("System instructions", value=default_prompt).replace("'","")
+
+
+st.markdown('------') 
+
+# widget for customer filter
+option = st.selectbox(
+    'Select a Customer ID',
+     purchases_products_df['CUSTOMER_ID'])
+
+# filter down to relevant products and categories
+# let participants define this?-----------
+filtered_products_df = purchases_products_df.loc[purchases_products_df['CUSTOMER_ID'] == option]['PRODUCT_ARRAY'].iloc[0]
+filtered_categories_df = purchases_categories_df.loc[purchases_categories_df['CUSTOMER_ID'] == option]['CATEGORY_ARRAY'].iloc[0]
+
+# display products and categories
+st.subheader("Products Purchased")
+filtered_products_df
+st.subheader("Categories Purchased")
+filtered_categories_df
+
+user_context = f"Products purchased: {filtered_products_df}, Product Categories: {filtered_categories_df}"
+
+# Use the job description to write the job to a table and run the function against it:
+if(st.button('Ask ChatGPT')):
+    result = session.sql(f"""SELECT chatgpt('{system}','{user_context}')""").collect()
+    st.header('Answer')
+    st.write(result[0][0].replace('"','')) 
